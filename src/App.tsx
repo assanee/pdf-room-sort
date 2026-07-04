@@ -9,11 +9,13 @@ import {
   Loader2,
   ShieldCheck,
   Files,
+  AlertTriangle,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { FileCard } from '@/components/FileCard'
+import { PdfViewerDialog } from '@/components/PdfViewerDialog'
 import { extractRoom } from '@/lib/extract'
 import { mergeFiles, downloadPdf, printPdf } from '@/lib/merge'
 import type { FileItem } from '@/lib/types'
@@ -50,6 +52,7 @@ export default function App() {
   const [toast, setToast] = React.useState<string | null>(null)
   const [draggingId, setDraggingId] = React.useState<string | null>(null)
   const [isOverDropzone, setIsOverDropzone] = React.useState(false)
+  const [view, setView] = React.useState<{ id: string; name: string; url: string } | null>(null)
 
   const mergedRef = React.useRef<Uint8Array | null>(null)
   const dragIdRef = React.useRef<string | null>(null)
@@ -84,6 +87,9 @@ export default function App() {
             updateItem(item.id, {
               status: 'done',
               room: r.room,
+              rawValue: r.rawValue,
+              needsReview: r.needsReview,
+              reviewReason: r.reviewReason,
               confidence: r.confidence,
               pageCount: r.pageCount,
               previewUrl: r.previewUrl,
@@ -118,6 +124,9 @@ export default function App() {
         file: f,
         status: 'queued',
         room: null,
+        rawValue: null,
+        needsReview: false,
+        reviewReason: null,
         confidence: 0,
         pageCount: 0,
         previewUrl: '',
@@ -196,8 +205,26 @@ export default function App() {
     [invalidateMerge],
   )
 
+  // Open the original PDF in a modal so the user can eyeball the room number.
+  const handleView = (id: string) => {
+    const item = items.find((i) => i.id === id)
+    if (!item) return
+    setView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url)
+      return { id: item.id, name: item.file.name, url: URL.createObjectURL(item.file) }
+    })
+  }
+
+  const closeView = () => {
+    setView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url)
+      return null
+    })
+  }
+
   const isProcessing = items.some((i) => i.status === 'processing' || i.status === 'queued')
   const doneCount = items.filter((i) => i.status === 'done' || i.status === 'error').length
+  const reviewCount = items.filter((i) => i.status === 'done' && i.needsReview).length
 
   const handleMerge = async () => {
     if (items.length === 0 || isProcessing || isMerging) return
@@ -323,7 +350,7 @@ export default function App() {
         {/* Toolbar */}
         {items.length > 0 && (
           <div className="sticky top-0 z-10 -mx-4 mt-6 flex flex-wrap items-center gap-2 border-b bg-background/90 px-4 py-3 backdrop-blur">
-            <div className="mr-auto text-sm text-muted-foreground">
+            <div className="mr-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               {isProcessing ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="size-3.5 animate-spin" />
@@ -333,6 +360,12 @@ export default function App() {
               ) : (
                 <span>
                   <span className="font-mono">{items.length}</span> ไฟล์
+                </span>
+              )}
+              {reviewCount > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="size-3.5" />
+                  <span className="font-mono">{reviewCount}</span> ต้องตรวจสอบ
                 </span>
               )}
             </div>
@@ -378,6 +411,7 @@ export default function App() {
                 canMoveUp={index > 0}
                 canMoveDown={index < items.length - 1}
                 onRemove={removeItem}
+                onView={handleView}
                 onMoveUp={(id) => moveByOffset(id, -1)}
                 onMoveDown={(id) => moveByOffset(id, 1)}
                 onDragStart={handleDragStart}
@@ -404,6 +438,17 @@ export default function App() {
           {toast}
         </div>
       )}
+
+      {/* PDF preview modal */}
+      <PdfViewerDialog
+        open={view !== null}
+        onOpenChange={(open) => {
+          if (!open) closeView()
+        }}
+        url={view?.url ?? null}
+        name={view?.name ?? ''}
+        item={view ? (items.find((i) => i.id === view.id) ?? null) : null}
+      />
     </div>
   )
 }

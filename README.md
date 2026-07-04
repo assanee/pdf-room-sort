@@ -12,12 +12,18 @@ single PDF sorted by room — all **client-side**. No file ever leaves the brows
 1. **Add PDFs** — drag-and-drop or pick files (`application/pdf`; non-PDFs are silently skipped).
 2. **Extract** — for each file, PDF.js renders page 1 to a canvas at 3× scale, then **tesseract.js OCRs
    only the top-right header crop** (`{ x0: 0.58, y0: 0.22, x1: 0.99, y1: 0.40 }`) and parses the room with
-   `\bRoom\b[^\d]{0,6}(\d{1,4})\b`. If page 1 yields no room, it falls back to pages 2–3. The batch runs at
-   **concurrency 2** through a **single shared OCR worker** (OCR calls are serialized via a mutex).
+   `\bRoom\b[^\d]{0,6}(\d{1,6})\b`. A room is only **accepted when it has exactly 3 digits**
+   (`validDigits` in the profile). A wrong-length read (e.g. a 2-digit misread) is *not* accepted: the app
+   keeps scanning pages 2–3 for a valid room, and if none is found the file is **flagged for review**
+   (showing the suspicious value it did read). The batch runs at **concurrency 2** through a **single
+   shared OCR worker** (OCR calls are serialized via a mutex).
 3. **Review & reorder** — each card shows a page-1 thumbnail, filename, page count, order index, and a
-   status badge (room found + confidence, "ไม่พบเลขห้อง", or "อ่านไฟล์ไม่ได้"). Drag cards or use the
-   up/down buttons. The list auto-sorts ascending by room when a batch finishes; a toolbar toggle flips
-   asc/desc. Files with no room sink to the bottom. **Manual order wins.**
+   status badge: valid room + confidence, an amber **"โปรดตรวจสอบ"** warning (wrong-length read or none
+   found), or "อ่านไฟล์ไม่ได้". A toolbar chip counts how many files need review. **Click the thumbnail or
+   the eye button to open the original PDF in a modal viewer** (with an "open in new tab" fallback for
+   browsers that won't embed PDFs) and check by eye. Drag cards or use the up/down
+   buttons to reorder. The list auto-sorts ascending by room when a batch finishes (a toolbar toggle flips
+   asc/desc); files needing review sink to the bottom. **Manual order wins.**
 4. **Merge** — `pdf-lib` copies the **original page bytes** (never re-rendered, so fidelity is preserved)
    in the current on-screen order. Then **download** or **print** the result.
 

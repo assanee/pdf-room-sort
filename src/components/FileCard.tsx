@@ -7,6 +7,7 @@ import {
   ChevronUp,
   ChevronDown,
   AlertTriangle,
+  Eye,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -21,6 +22,7 @@ type FileCardProps = {
   canMoveUp: boolean
   canMoveDown: boolean
   onRemove: (id: string) => void
+  onView: (id: string) => void
   onMoveUp: (id: string) => void
   onMoveDown: (id: string) => void
   onDragStart: (id: string) => void
@@ -30,7 +32,7 @@ type FileCardProps = {
 }
 
 /** Status badge (+ confidence) driven by the item's extraction result. */
-function StatusBadge({ item }: { item: FileItem }) {
+export function StatusBadge({ item }: { item: FileItem }) {
   if (item.status === 'queued' || item.status === 'processing') {
     return (
       <Badge variant="secondary" className="gap-1.5">
@@ -47,7 +49,7 @@ function StatusBadge({ item }: { item: FileItem }) {
       </Badge>
     )
   }
-  // done
+  // done + valid 3-digit room
   if (item.room) {
     return (
       <div className="flex items-center gap-2">
@@ -60,36 +62,53 @@ function StatusBadge({ item }: { item: FileItem }) {
       </div>
     )
   }
+  // done + needs review: wrong-length read (show the suspicious value) …
+  if (item.reviewReason === 'wrong_digits') {
+    return (
+      <Badge variant="warning" className="gap-1.5">
+        <AlertTriangle className="size-3" />
+        พบเลข <span className="font-mono">{item.rawValue}</span> — โปรดตรวจสอบ
+      </Badge>
+    )
+  }
+  // … or nothing found at all
   return (
-    <Badge variant="destructive" className="gap-1.5">
+    <Badge variant="warning" className="gap-1.5">
       <AlertTriangle className="size-3" />
-      ไม่พบเลขห้อง
+      ไม่พบเลขห้อง — โปรดตรวจสอบ
     </Badge>
   )
 }
 
-function Thumbnail({ item }: { item: FileItem }) {
-  const box = 'w-12 shrink-0 aspect-[210/297] overflow-hidden rounded-md border bg-muted'
-  if (item.previewUrl) {
-    return (
-      <div className={box}>
+/** Page-1 thumbnail. Clicking it opens the original PDF in a new tab for review. */
+function Thumbnail({ item, onView }: { item: FileItem; onView: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onView(item.id)}
+      aria-label={`ดูไฟล์ ${item.file.name}`}
+      className="group/thumb relative aspect-[210/297] w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {item.previewUrl ? (
         <img
           src={item.previewUrl}
-          alt={`หน้าแรกของ ${item.file.name}`}
+          alt=""
           className="h-full w-full object-cover object-top"
           draggable={false}
         />
-      </div>
-    )
-  }
-  return (
-    <div className={cn(box, 'grid place-items-center text-muted-foreground')}>
-      {item.status === 'error' ? (
-        <FileText className="size-5" />
       ) : (
-        <Loader2 className="size-5 animate-spin" />
+        <span className="grid h-full w-full place-items-center text-muted-foreground">
+          {item.status === 'error' ? (
+            <FileText className="size-5" />
+          ) : (
+            <Loader2 className="size-5 animate-spin" />
+          )}
+        </span>
       )}
-    </div>
+      <span className="absolute inset-0 grid place-items-center bg-black/45 text-white opacity-0 transition-opacity group-hover/thumb:opacity-100 group-focus-visible/thumb:opacity-100">
+        <Eye className="size-4" />
+      </span>
+    </button>
   )
 }
 
@@ -100,6 +119,7 @@ export function FileCard({
   canMoveUp,
   canMoveDown,
   onRemove,
+  onView,
   onMoveUp,
   onMoveDown,
   onDragStart,
@@ -108,6 +128,7 @@ export function FileCard({
   onDragEnd,
 }: FileCardProps) {
   const [over, setOver] = React.useState(false)
+  const flagged = item.status === 'done' && item.needsReview
 
   const handleDragStart = (e: React.DragEvent) => {
     // setData is required for Firefox to initiate a drag.
@@ -140,6 +161,7 @@ export function FileCard({
         'group flex items-center gap-3 rounded-xl border bg-card p-3 text-card-foreground shadow-sm transition-colors',
         over && 'border-primary ring-2 ring-primary/40',
         isDragging && 'opacity-40',
+        flagged && 'border-amber-400 bg-amber-50/60 dark:border-amber-500/50 dark:bg-amber-500/5',
       )}
     >
       {/* Drag handle + order index */}
@@ -150,7 +172,7 @@ export function FileCard({
         </span>
       </div>
 
-      <Thumbnail item={item} />
+      <Thumbnail item={item} onView={onView} />
 
       {/* Filename + metadata */}
       <div className="min-w-0 flex-1">
@@ -158,19 +180,14 @@ export function FileCard({
           {item.file.name}
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {item.pageCount > 0 ? (
-            <span className="font-mono">{item.pageCount}</span>
-          ) : (
-            <span className="font-mono">–</span>
-          )}{' '}
-          หน้า
+          <span className="font-mono">{item.pageCount > 0 ? item.pageCount : '–'}</span> หน้า
         </p>
         <div className="mt-2">
           <StatusBadge item={item} />
         </div>
       </div>
 
-      {/* Reorder + remove controls (keyboard/mobile alternative to drag) */}
+      {/* Reorder controls (keyboard/mobile alternative to drag) */}
       <div className="flex shrink-0 flex-col items-center gap-1">
         <Button
           variant="ghost"
@@ -193,15 +210,28 @@ export function FileCard({
           <ChevronDown className="size-4" />
         </Button>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-        onClick={() => onRemove(item.id)}
-        aria-label={`ลบ ${item.file.name}`}
-      >
-        <Trash2 className="size-4" />
-      </Button>
+
+      {/* View + remove */}
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('h-7 w-7', flagged && 'text-amber-600 dark:text-amber-400')}
+          onClick={() => onView(item.id)}
+          aria-label={`ดูไฟล์ ${item.file.name}`}
+        >
+          <Eye className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+          onClick={() => onRemove(item.id)}
+          aria-label={`ลบ ${item.file.name}`}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
     </li>
   )
 }

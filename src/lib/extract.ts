@@ -2,7 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { createWorker, OEM, PSM, type Worker } from 'tesseract.js'
 import { PROFILE, type Profile } from './profile'
-import type { ExtractResult } from './types'
+import type { ExtractResult, ReviewReason } from './types'
 
 // PDF.js renders on its own worker thread (bundled by Vite via the ?url import).
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -84,8 +84,10 @@ export async function extractRoom(file: File, profile: Profile = PROFILE): Promi
 
   try {
     const pageCount = pdf.numPages
+    const requiredDigits = profile.fields.room.validDigits
     let previewUrl = ''
-    let room: string | null = null
+    let room: string | null = null // valid = exactly requiredDigits long
+    let rawValue: string | null = null // first candidate seen, any length (for review)
     let confidence = 0
 
     const maxPages = Math.min(MAX_PAGES_TO_TRY, pageCount)
@@ -117,14 +119,33 @@ export async function extractRoom(file: File, profile: Profile = PROFILE): Promi
       page.cleanup()
 
       if (match) {
-        room = match[1]
-        confidence = data.confidence ?? 0
-        break
+        const digits = match[1]
+        if (digits.length === requiredDigits) {
+          // Accepted — a full, valid room number. Stop here.
+          room = digits
+          rawValue = digits
+          confidence = data.confidence ?? 0
+          break
+        }
+        // Wrong length (e.g. a 2-digit misread): remember the first one, but
+        // keep scanning the remaining pages in case a valid room shows up.
+        if (rawValue === null) {
+          rawValue = digits
+          confidence = data.confidence ?? 0
+        }
+        continue
       }
-      if (n === 1) confidence = data.confidence ?? 0 // keep page-1 confidence if nothing matched
+      if (n === 1 && rawValue === null) confidence = data.confidence ?? 0 // page-1 confidence if nothing matched
     }
 
-    return { room, confidence, pageCount, previewUrl }
+    const needsReview = room === null
+    const reviewReason: ReviewReason | null = !needsReview
+      ? null
+      : rawValue !== null
+        ? 'wrong_digits'
+        : 'not_found'
+
+    return { room, rawValue, needsReview, reviewReason, confidence, pageCount, previewUrl }
   } finally {
     await pdf.destroy()
   }
